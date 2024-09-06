@@ -1,0 +1,359 @@
+//@version=4
+study("SJCMom_C#_v1", max_bars_back=200 , overlay=true)
+// ******Inputs******
+//{
+timeRange = input(title="Time Range", type=input.string, defval="0000-2400")
+// startHr = input(title="Start Hour", type=input.integer, defval=6, minval=0, maxval=23)
+// endHr = input(title="End Hour", type=input.integer, defval=24, minval=1, maxval=24)
+plotLabels = input(title="Show Risk", type=input.bool, defval=true)
+labelTransp = input(title="Label Transparency", type=input.integer, defval=100, minval=0, maxval=100)
+timeDiff = hour(timenow) - hour(timenow, "GMT")
+
+// gmtStart = startHr + timeDiff
+// gmtEnd = endHr + timeDiff
+// if gmtStart < 0
+//     gmtStart := 24 + timeDiff
+// if gmtEnd < 0
+//     gmtEnd := 24 + timeDiff
+// startTime = tostring(gmtStart,"00")
+// endTime = tostring(gmtEnd,"00")
+// sessStr = startTime + "00" + "-" + endTime + "00"
+
+allDaysStr = ":1234567"
+//labelText = tostring(hour(timenow) + 2) + ", " + tostring(hour(timenow, "GMT"))
+timeStr = timeRange + allDaysStr
+//timeStr = sessStr + allDaysStr
+t = time(timeframe.period, timeStr)
+//bgcolor(not na(t) ? color.green : na)
+
+strat = input(title="Strategy", defval="Expansion", options=["Expansion", "Band Play"] )
+EnterOnPB = input(title="Enter On PB", type=input.bool, defval=false)
+EnterOnBO = input(title="ENter On BO", type=input.bool, defval=true)
+BOBars = input(title="BO # Of Bars", type=input.integer, defval=5)
+useSwingStop = input(title="Use Swing Stop", type=input.bool, defval=false)
+swingStrength = input(title="Swing Strength", type=input.integer, defval=3)
+filtSMALen = input(title="Filter SMA Length", type=input.integer, defval=50, minval=1)
+dirFilterType = input(title="Direction Filter", defval="Price Struct", options=["None", "Price Struct", "SMA Slope", "SMA Posn"])
+barsBeforeNextSetup = input(title="Bars Before Next Setup", type=input.integer, defval=3)
+atrMultiplier = input(title="ATR Stop Multiplier", type=input.float, defval=1.5)
+Tgt1 = input(title="Target 1", type=input.float, defval=1.0)
+Tgt2 = input(title="Target 2", type=input.float, defval=1.5)
+Tgt3 = input(title="Target 3", type=input.float, defval=2.0)
+//}
+
+//******Indicators******
+//{
+fastMALen = 5
+medMALen = 8
+slowMALen = 21
+bLen = 5
+bandHigh = ema(high, bLen)
+bandLow = ema(low, bLen)
+fastMA = sma(close, fastMALen)
+medMA = sma(close, medMALen)
+slowMA = sma(close, slowMALen)
+dirSMA = sma(close, 50)
+filtSMA = sma(close, filtSMALen)
+dstSMA = sma(close, 100)
+avgTrueRng = atr(7)
+//Plot indicators
+// plot(bandHigh, title="BandHigh", color=color.black)
+// plot(bandLow, title="BandLow", color=color.black)
+// plot(fastMA, title="5sma", color=color.yellow)
+// plot(medMA, title="8sma", color=color.white)
+// plot(slowMA, title="21sma", color=color.blue)
+// plot(dirSMA, title="50sma", color=color.black)
+// plot(dstSMA, title="100sma", color=color.gray)
+// plot(sma(close,200), title="200sma", color=color.yellow)
+// plot(sma(close,500), color=color.orange)
+//}
+//Calculate Pivot Swings
+//{
+_pvLow = pivotlow(low, swingStrength,swingStrength)
+_pvHigh = pivothigh(high, swingStrength,swingStrength)
+pvLow = _pvLow[0]
+pvHigh = _pvHigh[0]
+pvLo = fixnan(pvLow)
+pvHi = fixnan(pvHigh)
+lopc = (change(pvLo) != 0 or low[0] < pvLo) ? na : color.new(color.blue, 50)
+hipc = (change(pvHi) != 0 or high[0] > pvHi) ? na : color.new(color.red, 50)
+//plot(series=pvLo, title="LoPv", color=lopc, linewidth=1, style=plot.style_circles, offset=-swingStrength-1)
+//plot(series=pvHi, title="HiPv", color=hipc, linewidth=1, style=plot.style_circles, offset=-swingStrength-1)
+
+f_barssince(_cond, _count) => _barssince=bar_index-valuewhen(_cond, bar_index, _count)
+
+pvHi_1 = pvHi[f_barssince(change(pvHi) != 0, 1)]//barssince(change(pvHi) != 0)
+pvHi_2 = pvHi[f_barssince(change(pvHi) != 0, 2)]
+pvLo_1 = pvLo[f_barssince(change(pvLo) != 0, 1)]//barssince(change(pvHi) != 0)
+pvLo_2 = pvLo[f_barssince(change(pvLo) != 0, 2)]
+// prevPvHi = pvHi[pvHiBar_1+1]
+// prevPvLoBar = barssince(change(pvLo) != 0)
+// prevPvLo = pvLo[prevPvLoBar+1]
+//}
+//******Variables******
+//{
+var trEntry  = array.new_float(1, 0)
+var trStop   = array.new_float(1, 0)
+var trTP1 = array.new_float(1, 0)
+var trTP2 = array.new_float(1, 0)
+var trTP3 = array.new_float(1, 0)
+var trRisk = array.new_float(1, 0)
+var lastSetupBar = array.new_int(1, 0)
+var setupBarsAgo = 0//array.new_int(1, 0)
+var inTrade = array.new_float(1, 0)
+var setup = array.new_float(1, 0)//initialise setp to zero
+var resetTrade = array.new_float(1, 0)
+var minTick = syminfo.mintick
+var trDirection = array.new_float(1,0)
+nID = bar_index
+var upSMACross = array.new_bool(1,false)
+var dnSMACross = array.new_bool(1,false)
+var upbndClose = array.new_bool(1,false)
+var dnbndClose = array.new_bool(1,false)
+var sellSig = array.new_bool(1,false)
+var buySig = array.new_bool(1,false)
+var setupBar = array.new_int(1,0)
+//}
+
+
+TradeFilters() =>
+//{
+    direction = 0
+    //Check Price Structure using pivot swings
+    if (dirFilterType == "Price Struct")
+        
+        _hlhh = (pvLo[0] > pvLo_1 or pvLo[0] > pvLo_2)// and close[0] > pvHi[0]
+        _lhll = (pvHi[0] < pvHi_1 or pvHi[0] < pvHi_2)// and close[0] < pvLo[0]
+        // if (_hlhh and _lhll)
+        //     direction := 0
+        if (_hlhh)
+            direction := 1
+        else if (_lhll)
+            direction := -1
+    //Check directional SMA slope
+    else if (dirFilterType == "SMA Slope")
+        if (filtSMA[0] > filtSMA[1] and filtSMA[1] > filtSMA[2])
+            direction := 1
+        else if (filtSMA[0] < filtSMA[1] and filtSMA[1] < filtSMA[2])
+            direction := -1
+    
+    // Check above/below directional SMA
+    else if (dirFilterType == "SMA Posn")    
+        if (close[0] > filtSMA[0])
+            direction := 1
+        else if (close[0] < filtSMA[0])
+            direction := -1
+    //direction := 1
+    array.set(trDirection, 0, direction)
+    
+//}
+
+SetTradeParameters() =>
+//{
+	if (array.get(setup,0) == 1)
+	//{
+		array.set(inTrade, 0, 1)
+		if (EnterOnPB)
+			array.set(trEntry, 0, fastMA[0] + abs(fastMA[1] - fastMA[0]))
+		else if (strat == "Band Play")
+		    array.set(trEntry, 0, low[0] < bandLow[0] ? bandLow[0] : low[0])
+		else
+			array.set(trEntry, 0, close[0])
+
+		if (useSwingStop)
+			array.set(trStop, 0, pvLo[0])
+		else if (strat == "Expansion")
+		    StpRng = max(close[0] - low[0], max(avgTrueRng * atrMultiplier, close[0] - bandLow[0]))
+			array.set(trStop, 0, close[0] - StpRng * array.get(setup, 0))
+		else if (strat == "Band Play")
+		    StpRng = avgTrueRng * atrMultiplier//max(close[0] - low[0], avgTrueRng * atrMultiplier)
+		    array.set(trStop, 0, array.get(trEntry,0) - StpRng)
+	//}
+	else if (array.get(setup,0) == -1)
+	//{
+		array.set(inTrade, 0, -1)
+		if (EnterOnPB)
+			array.set(trEntry, 0, fastMA[0] - abs(fastMA[1] - fastMA[0]))
+		else if (strat == "Band Play")
+		    array.set(trEntry, 0, high[0] > bandHigh[0] ? bandHigh[0] : high[0])
+		else
+			array.set(trEntry, 0, close[0])
+			
+		if (useSwingStop)
+			//STP1 = high[max(0, Swing(3).SwingHighBar(0,1,10))]
+			array.set(trStop, 0, pvHi[0])
+		else if (strat == "Expansion")
+			StpRng = max(high[0] - close[0], max(avgTrueRng * atrMultiplier, close[0] - bandHigh[0]))
+			array.set(trStop, 0, close[0] - StpRng * array.get(setup, 0))
+		else if (strat == "Band Play")
+		    StpRng = avgTrueRng * atrMultiplier//max(high[0] - close[0], avgTrueRng * atrMultiplier)
+		    array.set(trStop, 0, array.get(trEntry,0) + StpRng)
+	//}		
+
+	if (array.get(inTrade, 0) != 0)
+    	Risk = abs(array.get(trStop, 0) - array.get(trEntry,0))
+    	// PBRisk = Instrument.MasterInstrument.RoundToTickSize(Math.Abs(STP1 - PBEntry));
+    	array.set(trTP1, 0, array.get(trEntry, 0) + array.get(setup, 0) * Tgt1 * Risk)
+    	array.set(trTP2, 0, array.get(trEntry, 0) + array.get(setup, 0) * Tgt2 * Risk)
+    	array.set(trTP3, 0, array.get(trEntry, 0) + array.get(setup, 0) * Tgt3 * Risk)
+    	array.set(trRisk, 0, int((Risk/minTick/10) * array.get(setup, 0)) )
+    
+    	//ConfigurePlots()
+//}
+
+//Check for SMA corossovers
+_smaCrossUp = crossover(medMA[0], slowMA[0])
+_smaCrossDn = crossunder(medMA[0], slowMA[0])
+
+CheckForSetup() =>
+//{
+    buySignal = false
+    sellSignal = false
+
+    if strat == "Band Play"
+    
+        if _smaCrossUp
+            array.set(upSMACross,0, true)
+            array.set(dnSMACross,0, false)
+            //buySignal := true
+        else if _smaCrossDn
+            array.set(upSMACross,0, false)
+            array.set(dnSMACross,0, true)
+            //sellSignal := true
+            
+        else if array.get(upSMACross,0) and close[0] > bandHigh[0]
+            array.set(upbndClose,0, true)
+            array.set(upSMACross,0, false)
+            array.set(setupBar,0, bar_index)
+            //buySignal := true
+        else if array.get(dnSMACross,0) and close[0] < bandLow[0]
+            array.set(dnbndClose,0, true)
+            array.set(dnSMACross,0, false)
+            array.set(setupBar,0, bar_index)
+            //sellSignal := true
+        
+        if array.get(upbndClose,0) and low[0] <= medMA[0] and bar_index > array.get(setupBar,0)//bandLow[0]
+            array.set(upSMACross,0, false)
+            array.set(upbndClose,0, false)
+            buySignal := true        
+
+        else if array.get(dnbndClose,0) and high[0] >= medMA[0] and bar_index > array.get(setupBar,0)//bandHigh[0]
+            array.set(dnSMACross,0, false)
+            array.set(dnbndClose,0, false)
+            sellSignal := true
+
+    
+    if strat == "Expansion"
+        // Check Price Action
+        longPriceAction = close[0] > bandHigh[0]	and close[0] > slowMA[0] and fastMA[0] > medMA[0] and fastMA[0] > fastMA[1] and medMA[0] > medMA[1] and fastMA[0] > slowMA[0]
+          //and close[0] > highest(high,BOBars)[1]
+        shortPriceAction = close[0] < bandLow[0] and close[0] < slowMA[0] and fastMA[0] < medMA[0] and fastMA[0] < fastMA[1] and medMA[0] < medMA[1] and fastMA[0] < slowMA[0]
+          //and close[0] < lowest(low,5)[1]
+        
+        // Check for Range BO
+        if EnterOnBO
+            buySignal := longPriceAction and close[0] > highest(high,BOBars)[1]
+            sellSignal := shortPriceAction and close[0] < lowest(low,BOBars)[1]
+        else
+            buySignal := longPriceAction
+            sellSignal := shortPriceAction
+        // Check for Expansion Play
+        // buySignal := close[0] > bandHigh[0]	and close[0] > slowMA[0] and fastMA[0] > medMA[0] and fastMA[0] > fastMA[1] and medMA[0] > medMA[1] and fastMA[0] > slowMA[0]
+        //   and close[0] > highest(high,BOBars)[1]
+        // sellSignal := close[0] < bandLow[0] and close[0] < slowMA[0] and fastMA[0] < medMA[0] and fastMA[0] < fastMA[1] and medMA[0] < medMA[1] and fastMA[0] < slowMA[0]
+        //   and close[0] < lowest(low,5)[1]
+    
+    
+        
+    //Buy Filter Check
+    if (buySignal and array.get(inTrade,0) == 0 and ((dirFilterType == "None") or array.get(trDirection,0) == 1))
+        array.set(setup, 0, 1)
+	    array.set(lastSetupBar, 0, nID)
+	else if (sellSignal and array.get(inTrade,0) == 0 and ((dirFilterType == "None") or array.get(trDirection,0) == -1))
+        array.set(setup, 0, -1)
+	    array.set(lastSetupBar, 0, nID)
+	else
+		array.set(setup,0,0)
+//}
+
+CheckForReset() =>
+//{
+    // if (strat == "Expansion")
+	if ((nID - array.get(lastSetupBar,0)) >= barsBeforeNextSetup)
+    	//****Has the trade setup Reset with a pullback to the slow MA***
+    	//*****Check if inShortTrade has been reset to allow for other entries*******
+    	if ( (array.get(inTrade,0) == -1) and ( (high[0] > slowMA[0]) or (high[0] > filtSMA[0]) or (abs(high[0]-slowMA[0]) < avgTrueRng*0.01) ) )
+    		array.set(resetTrade, 0, -1)
+    		array.set(inTrade, 0, 0)
+    	//*****Check if inLongTrade has been reset to allow for other entries*******
+    	else if ( (array.get(inTrade,0) == 1) and ( (low[0] < slowMA[0]) or (low[0] < filtSMA[0]) or (abs(low[0]-slowMA[0]) < avgTrueRng*0.01) ) )
+    		array.set(resetTrade, 0, 1)
+    		array.set(inTrade, 0, 0)
+    	else
+    		array.set(resetTrade, 0, 0)
+    // 	if (array.get(resetTrade,0) != 0)
+    // 		CheckForSetup()
+//}
+
+
+//Main code loop
+TradeFilters()
+CheckForReset()
+CheckForSetup()
+SetTradeParameters()
+
+
+Ent = array.get(trEntry,0)
+STP1 = array.get(trStop,0)
+TP1 = array.get(trTP1,0)
+TP2 = array.get(trTP2,0)
+TP3 = array.get(trTP3,0)
+
+
+plotColor = color.new(color.red, 100)
+_setup = array.get(setup,0)
+if (_setup == 1)
+    if (strat == "Band Play")
+        plotColor := color.rgb(8, 125, 218)
+    else
+        plotColor := color.blue
+else if (_setup == -1)
+    if (strat == "Band Play")
+        plotColor := color.rgb(230, 57, 57)//rgb(220,223,229)
+    else
+        plotColor := color.red
+    
+//plotColor = (array.get(setup, 0) == 1) ? color.blue : color.red
+
+plot(series=TP1, title="TP1", color=(_setup != 0) and t ? plotColor : na, linewidth=1, style=plot.style_circles)
+plot(series=TP2, title="TP2", color=(_setup != 0) and t ? plotColor : na, linewidth=1, style=plot.style_circles)
+plot(series=TP3, title="TP3", color=(_setup != 0) and t ? plotColor : na, linewidth=1, style=plot.style_circles)
+plot(series=STP1, title="STP", color=(_setup != 0) and t ? color.yellow : na, linewidth=1, style=plot.style_circles)
+plot(series=Ent, title="Entry", color=(_setup != 0) and t ? color.white : na, linewidth=1, style=plot.style_circles)
+
+if (_setup != 0) and not na(t) and plotLabels
+    l = label.new(bar_index, na)
+    labelText = tostring(array.get(trRisk,0)) + (strat == "Expansion" ? " e" : " b")
+    //labelText = sessStr + "\n" + timeStr//tostring(timeDiff)
+    //labelText = tostring(hour(timenow) + 2) + ", " + tostring(hour(timenow, "GMT"))
+    label.set_size(l, size.small)
+    label.set_text(l, labelText)
+    label.set_textcolor(l, color.black)
+    if (_setup == 1)
+        label.set_color(l, color=color.new(color.blue, labelTransp))
+        label.set_yloc(l, yloc.belowbar)
+        label.set_style(l, label.style_labelup)
+    else
+        label.set_color(l, color=color.new(color.red, labelTransp))
+        label.set_yloc(l, yloc.abovebar)
+        label.set_style(l, label.style_labeldown)
+
+// alert()
+
+
+array.set(setup,0,0)
+
+  
+
+    
+  

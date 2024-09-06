@@ -1,0 +1,13 @@
+alembic
+sqlalchemy
+logging
+flask
+flask-sqlalchemy
+flask-login
+flask-wtf
+flask-migrate
+yfinance
+pandas
+numpy
+oandapyV20
+
