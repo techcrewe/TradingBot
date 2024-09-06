@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from src.signal_generator import generate_signal, get_performance_stats  # Updated import statement
+from src.signal_generator import generate_signal, get_performance_stats, generate_signals_for_multiple_symbols  # Updated import statement
 from flask_migrate import Migrate  # Add this import
 
 app = Flask(__name__)
@@ -65,6 +65,12 @@ def dashboard():
         current_user.selected_symbol = request.form['symbol']  # Changed from 'stock' to 'symbol'
         db.session.commit()
     return render_template('dashboard.html', symbol=current_user.selected_symbol or 'AAPL')  # Default to AAPL if no symbol is selected
+
+@app.route('/get_signals')
+@login_required
+def get_signals():
+    signals = generate_signals_for_multiple_symbols()
+    return jsonify(signals)
 
 @app.route('/get_signal')
 @login_required

@@ -4,142 +4,202 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trading Bot Dashboard</title>
-    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js" onload="console.log('TradingView script loaded successfully');" onerror="console.error('Failed to load TradingView script');"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .dashboard-container {
+            display: flex;
+            flex-direction: column;
+        }
+        #tradingview_chart {
+            width: 100%;
+            max-width: 800px;
+            height: 400px;
+            margin-bottom: 20px;
+        }
+        .signals-table {
+            width: 100%;
+            max-width: 800px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .signals-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .signals-table th, .signals-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .signals-table th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+        }
+        .buy-signal {
+            color: blue;
+        }
+        .sell-signal {
+            color: red;
+        }
+        .signals-table tbody tr {
+            cursor: pointer;
+        }
+        .signals-table tbody tr:hover {
+            background-color: #f5f5f5;
+        }
+    </style>
 </head>
 <body>
-    <h1>Welcome, {{ current_user.username }}</h1>
-    <form method="POST">
-        <label for="symbol">Select Symbol (e.g., AAPL for stock, EUR/USD for forex):</label>
-        <input type="text" id="symbol" name="symbol" value="{{ symbol or '' }}" required>
-        <button type="submit">Update Symbol</button>
-    </form>
-    <div id="signal-container"></div>
-    <div id="performance-container"></div>
+    <h1>Trading Bot Dashboard</h1>
     
-    <!-- TradingView Chart Container -->
-    <div id="tradingview_chart" style="width:100%; height:600px;"></div>
+    <div class="dashboard-container">
+        <div id="tradingview_chart"></div>
+        <div class="signals-table">
+            <table id="signalsTable">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>D Exp</th>
+                        <th>Signal Date/Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Table rows will be populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
 
     <script>
-        function getSignal() {
-            fetch('/get_signal')
-                .then(response => response.json())
-                .then(data => {
-                    console.log('Signal data:', data);
-                    if (data.error) {
-                        document.getElementById('signal-container').innerHTML = data.error;
-                    } else {
-                        document.getElementById('signal-container').innerHTML = 
-                            `Signal for ${data.symbol}: ${data.signal}<br>
-                            Entry: ${data.entry.toFixed(4)}<br>
-                            Stop: ${data.stop.toFixed(4)}<br>
-                            Target: ${data.target.toFixed(4)}`;
-                        loadTradingViewChart(data.symbol, data.historical_signals, data.entry, data.stop, data.target);
+        function getSignals() {
+            console.log('Fetching signals data...');
+            fetch('/get_signals')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
                     }
+                    return response.json();
                 })
-                .catch(error => console.error('Error:', error));
+                .then(data => {
+                    console.log('Full signals data:', data);
+                    updateSignalsTable(data);
+                    // Load the chart for the first symbol in the list
+                    const firstSymbol = Object.keys(data)[0];
+                    loadTradingViewChart(firstSymbol);
+                })
+                .catch(error => {
+                    console.error('Error fetching signals data:', error);
+                    document.getElementById('signalsTable').innerHTML = `Error fetching signals data: ${error.message}`;
+                });
         }
 
-        function getPerformance() {
-            // ... (keep existing getPerformance function)
-        }
+        function updateSignalsTable(data) {
+            console.log('Updating signals table with:', data);
+            const tableBody = document.querySelector("#signalsTable tbody");
+            tableBody.innerHTML = ""; // Clear existing rows
 
-        function loadTradingViewChart(symbol, historicalSignals, entry, stop, target) {
-            document.getElementById('tradingview_chart').innerHTML = ''; // Clear previous chart
-            new TradingView.widget({
-                "width": "100%",
-                "height": 600,
-                "symbol": symbol.includes('/') ? symbol.replace('/', '') : symbol,
-                "interval": "D",
-                "timezone": "Etc/UTC",
-                "theme": "dark",
-                "style": "1",
-                "locale": "en",
-                "toolbar_bg": "#f1f3f6",
-                "enable_publishing": false,
-                "allow_symbol_change": true,
-                "container_id": "tradingview_chart",
-                "studies": [
-                    {"id": "MASimple@tv-basicstudies", "inputs": {"length": 5, "source": "high"}},
-                    {"id": "MASimple@tv-basicstudies", "inputs": {"length": 5, "source": "low"}},
-                ],
-                "studies_overrides": {
-                    "rsi.plot.color": "#FF0000",
-                    "macd.macd.color": "#0000FF",
-                    "macd.signal.color": "#FF0000"
-                },
-                "overrides": {
-                    "mainSeriesProperties.candleStyle.upColor": "#00ff00",
-                    "mainSeriesProperties.candleStyle.downColor": "#ff0000"
-                },
-                "loading_screen": { "backgroundColor": "#ffffff" },
-                "drawings": [
-                    ...historicalSignals.map(signal => ([
-                        {
-                            "type": "icon",
-                            "icon": signal.type === "BUY" ? "circle" : "triangle",
-                            "color": signal.type === "BUY" ? "#00FF00" : "#FF0000",
-                            "position": "aboveBar",
-                            "time": signal.time,
-                            "price": signal.price
-                        },
-                        ...(signal.stop !== null ? [{
-                            "type": "icon",
-                            "icon": "square",
-                            "color": "#FF0000",
-                            "position": "belowBar",
-                            "time": signal.time,
-                            "price": signal.stop
-                        }] : []),
-                        ...(signal.target !== null ? [{
-                            "type": "icon",
-                            "icon": "diamond",
-                            "color": "#0000FF",
-                            "position": "belowBar",
-                            "time": signal.time,
-                            "price": signal.target
-                        }] : [])
-                    ])).flat(),
-                    {
-                        "type": "horizontal_line",
-                        "price": entry,
-                        "color": "#000000",
-                        "linewidth": 2,
-                        "linestyle": 0,
-                        "text": "Entry"
-                    },
-                    {
-                        "type": "horizontal_line",
-                        "price": stop,
-                        "color": "#FF0000",
-                        "linewidth": 2,
-                        "linestyle": 2,
-                        "text": "Stop"
-                    },
-                    {
-                        "type": "horizontal_line",
-                        "price": target,
-                        "color": "#0000FF",
-                        "linewidth": 2,
-                        "linestyle": 2,
-                        "text": "Target"
+            for (const [symbol, signalData] of Object.entries(data)) {
+                const row = document.createElement("tr");
+                row.setAttribute('data-symbol', symbol);
+                const signal = signalData.current_signal;
+
+                let signalCell = '';
+                let dateTimeCell = '';
+                if (signal) {
+                    const minStep = symbol.includes('JPY') ? 0.01 : 0.0001;
+                    const riskValue = Math.round(Math.abs(signal.price - signal.stop) / minStep);
+                    const barsAgo = signal.bars_ago;
+                    const signPrefix = signal.type === 'BUY' ? '+' : '-';
+
+                    if (signal.type === 'BUY') {
+                        signalCell = `<span class="buy-signal">${signPrefix}${riskValue}.${barsAgo}</span>`;
+                    } else if (signal.type === 'SELL') {
+                        signalCell = `<span class="sell-signal">${signPrefix}${riskValue}.${barsAgo}</span>`;
                     }
-                ]
-            });
 
-            // Add RSI and MACD in separate panes
-            widget.chart().createStudy('RSI', false, false, [14], null, {"priceScale": {"scaleMargins": {"top": 0.8, "bottom": 0}}});
-            widget.chart().createStudy('MACD', false, false, [12, 26, 9], null, {"priceScale": {"scaleMargins": {"top": 0.1, "bottom": 0}}});
+                    dateTimeCell = signal.time;
+                }
+
+                row.innerHTML = `
+                    <td>${symbol}</td>
+                    <td>${signalCell}</td>
+                    <td>${dateTimeCell}</td>
+                `;
+                row.addEventListener('click', function() {
+                    loadTradingViewChart(this.getAttribute('data-symbol'));
+                });
+                tableBody.appendChild(row);
+            }
         }
 
-        // Initial load of chart with default or selected symbol
-        getSignal();
-        getPerformance();
+        function loadTradingViewChart(symbol) {
+            console.log('Loading chart with symbol:', symbol);
 
-        // Update every 5 minutes
-        setInterval(() => {
-            getSignal();
-            getPerformance();
-        }, 300000);
+            document.getElementById('tradingview_chart').innerHTML = ''; // Clear previous chart
+            
+            if (!symbol) {
+                console.error('No symbol provided for chart');
+                document.getElementById('tradingview_chart').innerHTML = 'Error: No symbol provided for chart';
+                return;
+            }
+
+            try {
+                console.log('Creating TradingView widget...');
+                new TradingView.widget({
+                    "width": "100%",
+                    "height": 400,
+                    "symbol": symbol.includes('/') ? symbol.replace('/', '') : symbol,
+                    "interval": "D",
+                    "timezone": "Etc/UTC",
+                    "theme": "dark",
+                    "style": "1",
+                    "locale": "en",
+                    "toolbar_bg": "#f1f3f6",
+                    "enable_publishing": false,
+                    "allow_symbol_change": true,
+                    "container_id": "tradingview_chart",
+                    "studies": [
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 5, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 8, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 21, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 50, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 100, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 200, "source": "close"}},
+                        {"id": "MACD@tv-basicstudies"}
+                    ]
+                });
+
+                console.log('TradingView widget created successfully');
+            } catch (error) {
+                console.error('Error creating TradingView widget:', error);
+                document.getElementById('tradingview_chart').innerHTML = 'Error: Unable to load chart';
+            }
+        }
+
+        function checkTradingViewLoaded() {
+            if (typeof TradingView !== 'undefined') {
+                console.log('TradingView is loaded, initializing...');
+                if (!window.tradingViewInitialized) {
+                    window.tradingViewInitialized = true;
+                    getSignals();
+
+                    // Update every 5 minutes
+                    setInterval(getSignals, 300000);
+                }
+            } else {
+                console.log('TradingView not loaded yet, waiting...');
+                setTimeout(checkTradingViewLoaded, 100);
+            }
+        }
+
+        // Initialize
+        checkTradingViewLoaded();
     </script>
 </body>
 </html>
