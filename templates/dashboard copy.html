@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot Dashboard</title>
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js" onload="console.log('TradingView script loaded successfully');" onerror="console.error('Failed to load TradingView script');"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .dashboard-container {
+            display: flex;
+            flex-direction: column;
+        }
+        #tradingview_chart {
+            width: 100%;
+            max-width: 800px;
+            height: 400px;
+            margin-bottom: 20px;
+        }
+        .signals-table {
+            width: 100%;
+            max-width: 800px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .signals-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .signals-table th, .signals-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .signals-table th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+        }
+        .buy-signal {
+            color: blue;
+        }
+        .sell-signal {
+            color: red;
+        }
+        .signals-table tbody tr {
+            cursor: pointer;
+        }
+        .signals-table tbody tr:hover {
+            background-color: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
+    <h1>Trading Bot Dashboard</h1>
+    
+    <div class="dashboard-container">
+        <div id="tradingview_chart"></div>
+        <div class="signals-table">
+            <table id="signalsTable">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>D Exp</th>
+                        <th>Signal Date/Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Table rows will be populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        function getSignals() {
+            console.log('Fetching signals data...');
+            fetch('/get_signals')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Full signals data:', data);
+                    updateSignalsTable(data);
+                    // Load the chart for the first symbol in the list
+                    const firstSymbol = Object.keys(data)[0];
+                    loadTradingViewChart(firstSymbol);
+                })
+                .catch(error => {
+                    console.error('Error fetching signals data:', error);
+                    document.getElementById('signalsTable').innerHTML = `Error fetching signals data: ${error.message}`;
+                });
+        }
+
+        function updateSignalsTable(data) {
+            console.log('Updating signals table with:', data);
+            const tableBody = document.querySelector("#signalsTable tbody");
+            tableBody.innerHTML = ""; // Clear existing rows
+
+            for (const [symbol, signalData] of Object.entries(data)) {
+                const row = document.createElement("tr");
+                row.setAttribute('data-symbol', symbol);
+                const signal = signalData.current_signal;
+
+                let signalCell = '';
+                let dateTimeCell = '';
+                if (signal) {
+                    const minStep = symbol.includes('JPY') ? 0.01 : 0.0001;
+                    const riskValue = Math.round(Math.abs(signal.price - signal.stop) / minStep);
+                    const barsAgo = signal.bars_ago;
+                    const signPrefix = signal.type === 'BUY' ? '+' : '-';
+
+                    if (signal.type === 'BUY') {
+                        signalCell = `<span class="buy-signal">${signPrefix}${riskValue}.${barsAgo}</span>`;
+                    } else if (signal.type === 'SELL') {
+                        signalCell = `<span class="sell-signal">${signPrefix}${riskValue}.${barsAgo}</span>`;
+                    }
+
+                    dateTimeCell = signal.time;
+                }
+
+                row.innerHTML = `
+                    <td>${symbol}</td>
+                    <td>${signalCell}</td>
+                    <td>${dateTimeCell}</td>
+                `;
+                row.addEventListener('click', function() {
+                    loadTradingViewChart(this.getAttribute('data-symbol'));
+                });
+                tableBody.appendChild(row);
+            }
+        }
+
+        function loadTradingViewChart(symbol) {
+            console.log('Loading chart with symbol:', symbol);
+
+            document.getElementById('tradingview_chart').innerHTML = ''; // Clear previous chart
+            
+            if (!symbol) {
+                console.error('No symbol provided for chart');
+                document.getElementById('tradingview_chart').innerHTML = 'Error: No symbol provided for chart';
+                return;
+            }
+
+            try {
+                console.log('Creating TradingView widget...');
+                new TradingView.widget({
+                    "width": "100%",
+                    "height": 400,
+                    "symbol": symbol.includes('/') ? symbol.replace('/', '') : symbol,
+                    "interval": "D",
+                    "timezone": "Etc/UTC",
+                    "theme": "dark",
+                    "style": "1",
+                    "locale": "en",
+                    "toolbar_bg": "#f1f3f6",
+                    "enable_publishing": false,
+                    "allow_symbol_change": true,
+                    "container_id": "tradingview_chart",
+                    "studies": [
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 5, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 8, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 21, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 50, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 100, "source": "close"}},
+                        {"id": "MASimple@tv-basicstudies", "inputs": {"length": 200, "source": "close"}},
+                        {"id": "MACD@tv-basicstudies"}
+                    ]
+                });
+
+                console.log('TradingView widget created successfully');
+            } catch (error) {
+                console.error('Error creating TradingView widget:', error);
+                document.getElementById('tradingview_chart').innerHTML = 'Error: Unable to load chart';
+            }
+        }
+
+        function checkTradingViewLoaded() {
+            if (typeof TradingView !== 'undefined') {
+                console.log('TradingView is loaded, initializing...');
+                if (!window.tradingViewInitialized) {
+                    window.tradingViewInitialized = true;
+                    getSignals();
+
+                    // Update every 5 minutes
+                    setInterval(getSignals, 300000);
+                }
+            } else {
+                console.log('TradingView not loaded yet, waiting...');
+                setTimeout(checkTradingViewLoaded, 100);
+            }
+        }
+
+        // Initialize
+        checkTradingViewLoaded();
+    </script>
+</body>
+</html>

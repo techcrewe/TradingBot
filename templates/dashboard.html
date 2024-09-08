@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trading Bot Dashboard</title>
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js" onload="console.log('TradingView script loaded successfully');" onerror="console.error('Failed to load TradingView script');"></script>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
         body {
             margin: 0;
@@ -16,6 +18,12 @@
             flex-direction: column;
         }
         #tradingview_chart {
+            width: 100%;
+            max-width: 800px;
+            height: 400px;
+            margin-bottom: 20px;
+        }
+        #lightweight_chart {
             width: 100%;
             max-width: 800px;
             height: 400px;
@@ -60,6 +68,7 @@
     
     <div class="dashboard-container">
         <div id="tradingview_chart"></div>
+        <div id="lightweight_chart"></div>
         <div class="signals-table">
             <table id="signalsTable">
                 <thead>
@@ -89,9 +98,9 @@
                 .then(data => {
                     console.log('Full signals data:', data);
                     updateSignalsTable(data);
-                    // Load the chart for the first symbol in the list
+                    // Load the charts for the first symbol in the list
                     const firstSymbol = Object.keys(data)[0];
-                    loadTradingViewChart(firstSymbol);
+                    updateCharts(firstSymbol);
                 })
                 .catch(error => {
                     console.error('Error fetching signals data:', error);
@@ -132,7 +141,7 @@
                     <td>${dateTimeCell}</td>
                 `;
                 row.addEventListener('click', function() {
-                    loadTradingViewChart(this.getAttribute('data-symbol'));
+                    updateCharts(this.getAttribute('data-symbol'));
                 });
                 tableBody.appendChild(row);
             }
@@ -182,18 +191,190 @@
             }
         }
 
+        function loadLightweightChart(symbol) {
+            console.log('Loading lightweight chart with symbol:', symbol);
+            const container = document.getElementById('lightweight_chart');
+            container.innerHTML = ''; // Clear previous chart
+
+            const chart = LightweightCharts.createChart(container, {
+                width: container.offsetWidth,
+                height: 400,
+                layout: {
+                    backgroundColor: '#ffffff',
+                    textColor: 'rgba(33, 56, 77, 1)',
+                },
+                grid: {
+                    vertLines: {
+                        color: 'rgba(197, 203, 206, 0.5)',
+                    },
+                    horzLines: {
+                        color: 'rgba(197, 203, 206, 0.5)',
+                    },
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                },
+                timeScale: {
+                    timeVisible: true,
+                    secondsVisible: false,
+                },
+                rightPriceScale: {
+                    borderColor: 'rgba(197, 203, 206, 0.8)',
+                    scaleMargins: {
+                        top: 0.1,
+                        bottom: 0.2,
+                    },
+                },
+            });
+
+            const candleSeries = chart.addCandlestickSeries({
+                upColor: '#26a69a',
+                downColor: '#ef5350',
+                borderVisible: false,
+                wickUpColor: '#26a69a',
+                wickDownColor: '#ef5350'
+            });
+
+            // Add moving averages
+            const ma5 = chart.addLineSeries({ color: 'rgba(255, 0, 0, 1)', lineWidth: 1 });
+            const ma8 = chart.addLineSeries({ color: 'rgba(0, 255, 0, 1)', lineWidth: 1 });
+            const ma21 = chart.addLineSeries({ color: 'rgba(0, 0, 255, 1)', lineWidth: 1 });
+            const ma50 = chart.addLineSeries({ color: 'rgba(255, 255, 0, 1)', lineWidth: 1 });
+            const ma100 = chart.addLineSeries({ color: 'rgba(255, 0, 255, 1)', lineWidth: 1 });
+            const ma200 = chart.addLineSeries({ color: 'rgba(0, 255, 255, 1)', lineWidth: 1 });
+
+            // Add MACD
+            const macdSeries = chart.addHistogramSeries({
+                color: '#26a69a',
+                priceFormat: {
+                    type: 'price',
+                    precision: 6,
+                    minMove: 0.000001,
+                },
+                priceScaleId: 'macd',
+                scaleMargins: {
+                    top: 0.8,
+                    bottom: 0,
+                },
+            });
+            const macdSignalSeries = chart.addLineSeries({
+                color: '#ef5350',
+                lineWidth: 2,
+                priceScaleId: 'macd',
+                scaleMargins: {
+                    top: 0.8,
+                    bottom: 0,
+                },
+            });
+            const macdLineSeries = chart.addLineSeries({
+                color: '#2962ff',
+                lineWidth: 2,
+                priceScaleId: 'macd',
+                scaleMargins: {
+                    top: 0.8,
+                    bottom: 0,
+                },
+            });
+
+            // Fetch data for the symbol
+            fetch(`/get_ohlc_data/${encodeURIComponent(symbol)}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    console.log('Received OHLC data:', data);
+                    candleSeries.setData(data.ohlc);
+                    ma5.setData(data.ma5.filter(item => item.value !== null));
+                    ma8.setData(data.ma8.filter(item => item.value !== null));
+                    ma21.setData(data.ma21.filter(item => item.value !== null));
+                    ma50.setData(data.ma50.filter(item => item.value !== null));
+                    ma100.setData(data.ma100.filter(item => item.value !== null));
+                    ma200.setData(data.ma200.filter(item => item.value !== null));
+                    macdSeries.setData(data.macd.histogram);
+                    macdSignalSeries.setData(data.macd.signal);
+                    macdLineSeries.setData(data.macd.macd);
+
+                    // Add symbol status line
+                    const lastData = data.ohlc[data.ohlc.length - 1];
+                    const statusLine = `${symbol} O: ${lastData.open.toFixed(4)} H: ${lastData.high.toFixed(4)} L: ${lastData.low.toFixed(4)} C: ${lastData.close.toFixed(4)}`;
+                    const statusSeries = chart.addLineSeries({
+                        color: 'rgba(0, 0, 0, 0)',
+                        lastValueVisible: false,
+                        priceLineVisible: false,
+                    });
+                    statusSeries.setData([{ time: lastData.time, value: lastData.high }]);
+                    statusSeries.setMarkers([
+                        {
+                            time: lastData.time,
+                            position: 'aboveBar',
+                            color: 'black',
+                            shape: 'text',
+                            text: statusLine,
+                        }
+                    ]);
+
+                    // Add price line and tooltip
+                    const toolTipWidth = 80;
+                    const toolTipHeight = 80;
+                    const toolTipMargin = 15;
+
+                    const toolTip = document.createElement('div');
+                    toolTip.style = `width: ${toolTipWidth}px; height: ${toolTipHeight}px; position: absolute; display: none; padding: 8px; box-sizing: border-box; font-size: 12px; text-align: left; z-index: 1000; top: 12px; left: 12px; pointer-events: none; border: 1px solid; border-radius: 2px;font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;`;
+                    container.appendChild(toolTip);
+
+                    chart.subscribeCrosshairMove(param => {
+                        if (param.point === undefined || !param.time || param.point.x < 0 || param.point.x > container.clientWidth || param.point.y < 0 || param.point.y > container.clientHeight) {
+                            toolTip.style.display = 'none';
+                        } else {
+                            const dateStr = new Date(param.time * 1000).toLocaleDateString();
+                            toolTip.style.display = 'block';
+                            const price = param.seriesPrices.get(candleSeries);
+                            toolTip.innerHTML = `<div style="color: ${'rgba(0, 150, 136, 1)'}">O: ${price.open.toFixed(4)}</div>
+                                <div style="color: ${'rgba(0, 150, 136, 1)'}">H: ${price.high.toFixed(4)}</div>
+                                <div style="color: ${'rgba(0, 150, 136, 1)'}">L: ${price.low.toFixed(4)}</div>
+                                <div style="color: ${'rgba(0, 150, 136, 1)'}">C: ${price.close.toFixed(4)}</div>`;
+
+                            const coordinate = candleSeries.priceToCoordinate(price.close);
+                            let shiftedCoordinate = param.point.x - 50;
+                            if (coordinate === null) {
+                                return;
+                            }
+                            shiftedCoordinate = Math.max(0, Math.min(container.clientWidth - toolTipWidth, shiftedCoordinate));
+                            const coordinateY = coordinate - toolTipHeight - toolTipMargin > 0 ? coordinate - toolTipHeight - toolTipMargin : Math.max(0, Math.min(container.clientHeight - toolTipHeight - toolTipMargin, coordinate + toolTipMargin));
+                            toolTip.style.left = shiftedCoordinate + 'px';
+                            toolTip.style.top = coordinateY + 'px';
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching OHLC data:', error);
+                    container.innerHTML = `Error: Unable to load chart data - ${error.message}`;
+                });
+        }
+
+        function updateCharts(symbol) {
+            loadTradingViewChart(symbol);
+            loadLightweightChart(symbol);
+        }
+
         function checkTradingViewLoaded() {
-            if (typeof TradingView !== 'undefined') {
-                console.log('TradingView is loaded, initializing...');
-                if (!window.tradingViewInitialized) {
-                    window.tradingViewInitialized = true;
+            if (typeof TradingView !== 'undefined' && typeof LightweightCharts !== 'undefined') {
+                console.log('TradingView and Lightweight Charts are loaded, initializing...');
+                if (!window.chartsInitialized) {
+                    window.chartsInitialized = true;
                     getSignals();
 
                     // Update every 5 minutes
                     setInterval(getSignals, 300000);
                 }
             } else {
-                console.log('TradingView not loaded yet, waiting...');
+                console.log('TradingView or Lightweight Charts not loaded yet, waiting...');
                 setTimeout(checkTradingViewLoaded, 100);
             }
         }
