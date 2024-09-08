@@ -25,6 +25,6 @@
 
    # Design Files
    AI-powered trading bots.txt
-   oanda.cfg
+   backend/oanda.cfg
 
    
