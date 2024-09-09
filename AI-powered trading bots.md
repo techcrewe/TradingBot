@@ -69,5 +69,3 @@ To allow subscribers to select their preferred stock or instrument and view the 
 2. **Connect Data to a Dashboard** using Grafana or Power BI to display live performance stats.
 3. **Build a Website/App** where subscribers can sign up, choose stocks or instruments, and access real-time signal alerts.
 4. **Send Signals to Users** via email, SMS, or a messaging platform like Telegram.
-
-Would you like guidance on setting up any specific part of this workflow?

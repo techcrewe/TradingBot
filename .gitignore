@@ -24,7 +24,7 @@
    Thumbs.db
 
    # Design Files
-   AI-powered trading bots.txt
-   backend/oanda.cfg
+   ./AI-powered trading bots.txt
+   ./backend/oanda.cfg
 
    
