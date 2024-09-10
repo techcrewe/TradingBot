@@ -3,10 +3,12 @@
    *.py[cod]
    *.so
 
-   # Virtual environment
+   # Ignore Virtual environment
    venv/
    env/
    .env
+   .venv/
+   
 
    # Flask
    instance/
